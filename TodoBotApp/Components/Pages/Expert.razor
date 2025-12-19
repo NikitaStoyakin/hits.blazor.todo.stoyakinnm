@@ -1,0 +1,398 @@
+@page "/expert"
+@using TodoBotApp.Services
+@using TodoBotApp.Data.Models
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Expert")]
+@rendermode InteractiveServer
+
+<PageTitle>Панель эксперта</PageTitle>
+
+<h1>Панель эксперта</h1>
+
+<div class="info-banner">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <p style="margin: 0;">📋 Здесь отображаются вопросы пользователей, на которые <strong>бот не смог ответить</strong> или которые были отправлены эксперту вручную.</p>
+        <button type="button" 
+                class="btn-refresh" 
+                @onclick="LoadQuestionsAsync"
+                disabled="@isLoading"
+                title="Обновить список вопросов">
+            🔄 @(isLoading ? "Обновление..." : "Обновить")
+        </button>
+    </div>
+</div>
+
+@if (isLoading)
+{
+    <p>Загрузка вопросов...</p>
+}
+else if (pendingQuestions.Any())
+{
+    <div class="questions-list">
+        <h2>Вопросы, ожидающие ответа (@pendingQuestions.Count)</h2>
+        
+        @foreach (var question in pendingQuestions)
+        {
+            <div class="question-card @(selectedQuestionId == question.Id ? "selected" : "")">
+                <div class="question-header" @onclick="() => SelectQuestion(question.Id)">
+                    <div class="question-info">
+                        <strong>Вопрос #@question.Id</strong>
+                        <span class="question-date">@question.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                    </div>
+                    <div class="question-status">
+                        <span class="status-badge status-@question.Status.ToString().ToLower()">
+                            @GetStatusDisplayName(question.Status)
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="question-content">
+                    <p><strong>Вопрос:</strong> @question.Question</p>
+                </div>
+
+                @if (selectedQuestionId == question.Id)
+                {
+                    <div class="answer-section">
+                        @if (question.Status == ExpertQuestionStatus.Answered && !string.IsNullOrEmpty(question.Answer))
+                        {
+                            <div class="existing-answer">
+                                <strong>Ваш ответ:</strong>
+                                <p>@question.Answer</p>
+                                <small>Ответ дан: @question.AnsweredAt?.ToString("dd.MM.yyyy HH:mm")</small>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="answer-form">
+                                <label>Ваш ответ:</label>
+                                <textarea @bind="answerText" 
+                                          class="answer-textarea" 
+                                          placeholder="Введите ответ на вопрос..."
+                                          rows="5"></textarea>
+                                <div class="answer-actions">
+                                    <button type="button" 
+                                            class="btn-submit-answer" 
+                                            @onclick="() => SubmitAnswer(question.Id)"
+                                            disabled="@string.IsNullOrWhiteSpace(answerText)">
+                                        Отправить ответ
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div class="no-questions">
+        <p>Нет вопросов, ожидающих ответа.</p>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="error-message">
+        @errorMessage
+    </div>
+}
+
+<style>
+    .questions-list {
+        margin-top: 20px;
+    }
+
+    .question-card {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        padding: 15px;
+        background: white;
+        transition: box-shadow 0.2s;
+    }
+
+    .question-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .question-card.selected {
+        border-color: #007bff;
+        box-shadow: 0 2px 8px rgba(0,123,255,0.2);
+    }
+
+    .question-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+        margin-bottom: 10px;
+    }
+
+    .question-info {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .question-date {
+        font-size: 12px;
+        color: #666;
+    }
+
+    .question-content {
+        margin: 10px 0;
+    }
+
+    .status-badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+
+    .status-pending {
+        background: #ffc107;
+        color: #000;
+    }
+
+    .status-inprogress {
+        background: #17a2b8;
+        color: white;
+    }
+
+    .status-answered {
+        background: #28a745;
+        color: white;
+    }
+
+    .answer-section {
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 2px solid #007bff;
+    }
+
+    .answer-form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .answer-textarea {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        font-family: inherit;
+        font-size: 14px;
+    }
+
+    .answer-actions {
+        display: flex;
+        gap: 10px;
+    }
+
+    .btn-submit-answer {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .btn-submit-answer {
+        background: #28a745;
+        color: white;
+    }
+
+    .btn-submit-answer:hover:not(:disabled) {
+        background: #218838;
+    }
+
+    .btn-submit-answer:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+
+
+    .existing-answer {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 5px;
+        border-left: 4px solid #28a745;
+    }
+
+    .no-questions {
+        text-align: center;
+        padding: 40px;
+        color: #666;
+    }
+
+    .error-message {
+        background: #ffcccc;
+        color: #d8000c;
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 5px;
+    }
+
+    .info-banner {
+        background: #e7f3ff;
+        border-left: 4px solid #007bff;
+        padding: 15px;
+        margin: 20px 0;
+        border-radius: 5px;
+    }
+
+    .info-banner p {
+        margin: 0;
+        color: #004085;
+    }
+
+
+    .btn-refresh {
+        padding: 8px 16px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 14px;
+        white-space: nowrap;
+        margin-left: 15px;
+        transition: background 0.2s;
+    }
+
+    .btn-refresh:hover:not(:disabled) {
+        background: #0056b3;
+    }
+
+    .btn-refresh:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+</style>
+
+@code {
+    [Inject] private IExpertService ExpertService { get; set; } = null!;
+    [Inject] private AuthenticationStateProvider AuthenticationStateProvider { get; set; } = null!;
+    [Inject] private ILogger<Expert> Logger { get; set; } = null!;
+
+    private List<ExpertQuestion> pendingQuestions = new();
+    private int? selectedQuestionId = null;
+    private string answerText = "";
+    private bool isLoading = true;
+    private string errorMessage = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadQuestionsAsync();
+    }
+
+    private async Task LoadQuestionsAsync()
+    {
+        try
+        {
+            isLoading = true;
+            pendingQuestions = await ExpertService.GetPendingQuestionsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при загрузке вопросов");
+            errorMessage = "Не удалось загрузить вопросы. Попробуйте позже.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void SelectQuestion(int questionId)
+    {
+        if (selectedQuestionId == questionId)
+        {
+            selectedQuestionId = null;
+            answerText = "";
+        }
+        else
+        {
+            selectedQuestionId = questionId;
+            var question = pendingQuestions.FirstOrDefault(q => q.Id == questionId);
+            if (question != null && !string.IsNullOrEmpty(question.Answer))
+            {
+                answerText = question.Answer;
+            }
+            else
+            {
+                answerText = "";
+            }
+        }
+        StateHasChanged();
+    }
+
+    private async Task SubmitAnswer(int questionId)
+    {
+        if (string.IsNullOrWhiteSpace(answerText))
+            return;
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var expertId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (string.IsNullOrEmpty(expertId))
+            {
+                errorMessage = "Не удалось определить эксперта.";
+                return;
+            }
+
+            var success = await ExpertService.AnswerQuestionAsync(questionId, expertId, answerText);
+
+            if (success)
+            {
+                // Удаляем вопрос из списка, так как он теперь отвечен
+                var question = pendingQuestions.FirstOrDefault(q => q.Id == questionId);
+                if (question != null)
+                {
+                    pendingQuestions.Remove(question);
+                }
+
+                answerText = "";
+                selectedQuestionId = null;
+                errorMessage = "";
+                Logger.LogInformation("Эксперт ответил на вопрос. QuestionId: {QuestionId}, ExpertId: {ExpertId}", questionId, expertId);
+            }
+            else
+            {
+                errorMessage = "Не удалось отправить ответ. Попробуйте позже.";
+            }
+
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при отправке ответа");
+            errorMessage = "Произошла ошибка при отправке ответа. Попробуйте позже.";
+            StateHasChanged();
+        }
+    }
+
+
+    private string GetStatusDisplayName(ExpertQuestionStatus status)
+    {
+        return status switch
+        {
+            ExpertQuestionStatus.Pending => "Ожидает",
+            ExpertQuestionStatus.InProgress => "В работе",
+            ExpertQuestionStatus.Answered => "Отвечено",
+            ExpertQuestionStatus.Resolved => "Решено",
+            _ => status.ToString()
+        };
+    }
+}
+

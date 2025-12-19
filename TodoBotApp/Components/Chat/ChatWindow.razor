@@ -1,0 +1,895 @@
+﻿@* Components/Chat/ChatWindow.razor *@
+@using TodoBotApp.Services
+@using TodoBotApp.Data.Models
+@using System.Security.Claims
+@inject IBotService BotService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ILogger<ChatWindow> Logger
+
+<div class="chat-container">
+    <div class="chat-header">
+        <h3> Чат-бот поддержки</h3>
+        @if (messages.Any() && !isLoading)
+        {
+            <button type="button" 
+                    class="delete-history-btn" 
+                    @onclick="HandleDeleteHistory" 
+                    @onclick:preventDefault="true"
+                    title="Удалить историю сообщений">
+                🗑️ Очистить
+            </button>
+        }
+    </div>
+
+    <div class="chat-messages" @ref="messagesContainer">
+        @if (isLoading)
+        {
+            <div class="loading">
+                Загрузка...
+            </div>
+        }
+        else if (messages.Any())
+        {
+            @foreach (var message in messages)
+            {
+                <div class="message @(message.IsUserMessage ? "user-message" : "bot-message")">
+                    <div class="message-content">
+                        @message.Message
+                    </div>
+                    <div class="message-time">
+                        @message.Timestamp.ToString("HH:mm")
+                    </div>
+                    @if (!message.IsUserMessage)
+                    {
+                        var userMessage = GetUserMessageForBotResponse(message);
+                        @if (userMessage != null && userMessage.Id > 0)
+                        {
+                            <div class="message-feedback">
+                                @if (userMessage.UserFeedback == null)
+                                {
+                                    <span class="feedback-label">Помог ли ответ?</span>
+                                    <button type="button" 
+                                            class="btn-feedback btn-feedback-positive" 
+                                            @onclick="() => HandleFeedback(userMessage.Id, true)"
+                                            title="Ответ правильный">
+                                        👍
+                                    </button>
+                                    <button type="button" 
+                                            class="btn-feedback btn-feedback-negative" 
+                                            @onclick="() => HandleFeedback(userMessage.Id, false)"
+                                            title="Ответ неправильный">
+                                        👎
+                                    </button>
+                                }
+                                else if (userMessage.UserFeedback == false && showIntentSelector == userMessage.Id)
+                                {
+                                    <div class="intent-selector">
+                                        <button type="button" 
+                                                class="btn-send-expert" 
+                                                @onclick="() => SendToExpert(userMessage.Id, userMessage.Message)">
+                                            Отправить эксперту
+                                        </button>
+                                    </div>
+                                }
+                                else if (userMessage.UserFeedback == true)
+                                {
+                                    <span class="feedback-confirmed">✓ Спасибо за обратную связь!</span>
+                                }
+                                else if (userMessage.UserFeedback == false && !string.IsNullOrEmpty(userMessage.CorrectIntent))
+                                {
+                                    <span class="feedback-confirmed">✓ Обучено: @GetIntentDisplayName(userMessage.CorrectIntent)</span>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <div class="empty-chat">
+                <p>Начните диалог с чат-ботом</p>
+            </div>
+        }
+    </div>
+
+    <div class="chat-input">
+        <input @bind="currentMessage"
+               @bind:event="oninput"
+               @onkeydown="HandleKeyPress"
+               placeholder="Введите ваш вопрос..."
+               disabled="@isSending" />
+        <button type="button" 
+                @onclick="HandleSendClick" 
+                @onclick:preventDefault="true" 
+                @onclick:stopPropagation="true"
+                disabled="@isSending">
+            @if (isSending)
+            {
+                <span>Отправка...</span>
+            }
+            else
+            {
+                <span>Отправить</span>
+            }
+        </button>
+    </div>
+
+    @if (showDeleteConfirmation)
+    {
+        <div class="confirmation-dialog">
+            <div class="confirmation-content">
+                <h4>Подтверждение удаления</h4>
+                <p>Вы уверены, что хотите удалить всю историю сообщений? Это действие нельзя отменить.</p>
+                <div class="confirmation-buttons">
+                    <button type="button" class="btn-confirm" @onclick="ConfirmDeleteHistory">Да, удалить</button>
+                    <button type="button" class="btn-cancel" @onclick="CancelDeleteHistory">Отмена</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-message">
+            @errorMessage
+        </div>
+    }
+</div>
+
+<style>
+    .chat-container {
+        max-width: 800px;
+        margin: 0 auto;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+
+    .chat-header {
+        background: #007bff;
+        color: white;
+        padding: 15px;
+        text-align: center;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .chat-header h3 {
+        margin: 0;
+        flex: 1;
+    }
+
+    .delete-history-btn {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 5px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.2s;
+    }
+
+    .delete-history-btn:hover {
+        background: rgba(255, 255, 255, 0.3);
+    }
+
+    .delete-history-btn:active {
+        background: rgba(255, 255, 255, 0.4);
+    }
+
+    .chat-messages {
+        height: 400px;
+        overflow-y: auto;
+        padding: 20px;
+        background: #f9f9f9;
+    }
+
+    .message {
+        margin-bottom: 15px;
+        padding: 10px 15px;
+        border-radius: 10px;
+        max-width: 70%;
+    }
+
+    .user-message {
+        background: #007bff;
+        color: white;
+        margin-left: auto;
+        border-bottom-right-radius: 0;
+    }
+
+    .bot-message {
+        background: #e9ecef;
+        color: #333;
+        margin-right: auto;
+        border-bottom-left-radius: 0;
+    }
+
+    .message-content {
+        word-wrap: break-word;
+    }
+
+    .message-time {
+        font-size: 0.8em;
+        opacity: 0.7;
+        margin-top: 5px;
+        text-align: right;
+    }
+
+    .chat-input {
+        display: flex;
+        padding: 15px;
+        background: white;
+        border-top: 1px solid #ddd;
+    }
+
+    .chat-input input {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        margin-right: 10px;
+        font-size: 16px;
+    }
+
+    .chat-input button {
+        padding: 10px 20px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+    }
+
+    .chat-input button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .chat-input button:not(:disabled):hover {
+        background: #0056b3;
+    }
+
+    .chat-input button:not(:disabled):active {
+        background: #004085;
+    }
+
+    .loading, .empty-chat {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+    }
+
+    .error-message {
+        background: #ffcccc;
+        color: #d8000c;
+        padding: 10px;
+        margin: 10px;
+        border-radius: 5px;
+        text-align: center;
+    }
+
+    .confirmation-dialog {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .confirmation-content {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        max-width: 400px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .confirmation-content h4 {
+        margin: 0 0 10px 0;
+        color: #333;
+    }
+
+    .confirmation-content p {
+        margin: 0 0 20px 0;
+        color: #666;
+    }
+
+    .confirmation-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+    }
+
+    .btn-confirm {
+        background: #dc3545;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+
+    .btn-confirm:hover {
+        background: #c82333;
+    }
+
+    .btn-cancel {
+        background: #6c757d;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+
+    .btn-cancel:hover {
+        background: #5a6268;
+    }
+
+    .message-feedback {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+    }
+
+    .bot-message .message-feedback {
+        border-top-color: rgba(0, 0, 0, 0.1);
+    }
+
+    .feedback-label {
+        color: #666;
+        font-size: 11px;
+    }
+
+    .btn-feedback {
+        background: transparent;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: all 0.2s;
+    }
+
+    .btn-feedback:hover {
+        background: #f0f0f0;
+        transform: scale(1.1);
+    }
+
+    .btn-feedback-positive:hover {
+        border-color: #28a745;
+        background: #d4edda;
+    }
+
+    .btn-feedback-negative:hover {
+        border-color: #dc3545;
+        background: #f8d7da;
+    }
+
+    .feedback-confirmed {
+        color: #28a745;
+        font-size: 11px;
+        font-style: italic;
+    }
+
+    .intent-selector {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 5px;
+        margin-top: 5px;
+    }
+
+    .intent-selector label {
+        font-size: 11px;
+        color: #666;
+        font-weight: bold;
+    }
+
+    .intent-select {
+        padding: 5px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 12px;
+    }
+
+    .btn-confirm-intent,
+    .btn-cancel-intent {
+        padding: 5px 10px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+    }
+
+    .btn-confirm-intent {
+        background: #28a745;
+        color: white;
+    }
+
+    .btn-confirm-intent:hover:not(:disabled) {
+        background: #218838;
+    }
+
+    .btn-confirm-intent:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+
+    .btn-cancel-intent {
+        background: #6c757d;
+        color: white;
+    }
+
+    .btn-cancel-intent:hover {
+        background: #5a6268;
+    }
+
+    .btn-send-expert {
+        background: #ffc107;
+        color: #000;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 11px;
+    }
+
+    .btn-send-expert:hover {
+        background: #e0a800;
+    }
+</style>
+
+@code {
+    private List<ChatMessage> messages = new();
+    private string currentMessage = "";
+    private ElementReference messagesContainer;
+    private bool isLoading = true;
+    private bool isSending = false;
+    private string errorMessage = "";
+    private bool showDeleteConfirmation = false;
+    private int? showIntentSelector = null;
+    private string selectedIntent = "";
+    private List<string> availableIntents = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Загружаем доступные интенты
+            availableIntents = await BotService.GetAvailableIntentsAsync();
+
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrEmpty(userId))
+                {
+                    messages = await BotService.GetConversationHistoryAsync(userId);
+                }
+            }
+            else
+            {
+                messages.Add(new ChatMessage
+                    {
+                        Message = "Привет! Я чат-бот поддержки. Пожалуйста, войдите в систему, чтобы использовать все функции.",
+                        IsUserMessage = false,
+                        Timestamp = DateTime.Now
+                    });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при загрузке истории чата");
+            errorMessage = "Не удалось загрузить историю сообщений. Попробуйте позже.";
+        }
+        finally
+        {
+            isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (isSending)
+        {
+            Logger.LogWarning("Попытка отправить сообщение, когда уже идет отправка");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(currentMessage))
+        {
+            Logger.LogWarning("Попытка отправить пустое сообщение");
+            return;
+        }
+
+        isSending = true;
+        errorMessage = "";
+        
+        Logger.LogInformation("Начало отправки сообщения: {Message}", currentMessage);
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                var botMessage = new ChatMessage
+                    {
+                        Message = "Для использования чат-бота необходимо войти в систему.",
+                        IsUserMessage = false,
+                        Timestamp = DateTime.Now
+                    };
+                messages.Add(botMessage);
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                errorMessage = "Не удалось определить пользователя. Пожалуйста, войдите снова.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var messageToSend = currentMessage;
+            currentMessage = "";
+
+            await InvokeAsync(StateHasChanged);
+
+            Logger.LogInformation("Обработка сообщения через BotService. UserId: {UserId}, Message: {Message}", userId, messageToSend);
+            
+            var (response, userMessageId) = await BotService.ProcessMessageAsync(messageToSend, userId);
+            
+            Logger.LogInformation("Получен ответ от бота: {Response}, UserMessageId: {UserMessageId}", response, userMessageId);
+
+            messages = await BotService.GetConversationHistoryAsync(userId);
+            
+            Logger.LogInformation("История загружена. Количество сообщений: {Count}", messages.Count);
+
+            await InvokeAsync(StateHasChanged);
+            await ScrollToBottom();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при отправке сообщения");
+            errorMessage = "Не удалось отправить сообщение. Попробуйте еще раз.";
+
+            var errorBotMessage = new ChatMessage
+                {
+                    Message = "Извините, произошла ошибка. Попробуйте позже.",
+                    IsUserMessage = false,
+                    Timestamp = DateTime.Now
+                };
+            messages.Add(errorBotMessage);
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            isSending = false;
+            Logger.LogInformation("Завершение отправки сообщения. isSending установлен в false");
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task HandleSendClick()
+    {
+        Logger.LogInformation("Кнопка 'Отправить' была нажата. Текущее сообщение: '{Message}', isSending: {IsSending}", 
+            currentMessage ?? "(null)", isSending);
+        await SendMessage();
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey && !isSending)
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try
+        {
+            await Task.Delay(100);
+            await messagesContainer.FocusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при скролле к нижней части чата");
+        }
+    }
+
+    private void HandleDeleteHistory()
+    {
+        showDeleteConfirmation = true;
+        StateHasChanged();
+    }
+
+    private void CancelDeleteHistory()
+    {
+        showDeleteConfirmation = false;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmDeleteHistory()
+    {
+        showDeleteConfirmation = false;
+        
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                errorMessage = "Для удаления истории необходимо войти в систему.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                errorMessage = "Не удалось определить пользователя.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            Logger.LogInformation("Начало удаления истории для пользователя: {UserId}", userId);
+
+            var success = await BotService.DeleteConversationHistoryAsync(userId);
+
+            if (success)
+            {
+                messages.Clear();
+                errorMessage = "";
+                Logger.LogInformation("История успешно удалена");
+                
+                messages.Add(new ChatMessage
+                {
+                    Message = "История сообщений была очищена. Начните новый диалог.",
+                    IsUserMessage = false,
+                    Timestamp = DateTime.Now
+                });
+            }
+            else
+            {
+                errorMessage = "Не удалось удалить историю сообщений. Попробуйте позже.";
+                Logger.LogWarning("Ошибка при удалении истории для пользователя: {UserId}", userId);
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при удалении истории сообщений");
+            errorMessage = "Произошла ошибка при удалении истории. Попробуйте позже.";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task HandleFeedback(int messageId, bool isCorrect)
+    {
+        try
+        {
+            if (isCorrect)
+            {
+                // Позитивная обратная связь
+                var success = await BotService.ProvideFeedbackAsync(messageId, true);
+                if (success)
+                {
+                    // Обновляем сообщение в списке
+                    var message = messages.FirstOrDefault(m => m.Id == messageId);
+                    if (message != null)
+                    {
+                        message.UserFeedback = true;
+                    }
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+            else
+            {
+                // Негативная обратная связь - вызываем ProvideFeedbackAsync для отправки вопроса эксперту
+                // (если есть похожий вопрос с ответом эксперта, вопрос будет отправлен автоматически)
+                var success = await BotService.ProvideFeedbackAsync(messageId, false);
+                if (success)
+                {
+                    // Обновляем сообщение в списке
+                    var message = messages.FirstOrDefault(m => m.Id == messageId);
+                    if (message != null)
+                    {
+                        message.UserFeedback = false;
+                    }
+                    
+                    // Перезагружаем историю, чтобы получить обновленные данные
+                    var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                    var user = authState.User;
+                    if (user.Identity?.IsAuthenticated == true)
+                    {
+                        var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                        if (!string.IsNullOrEmpty(userId))
+                        {
+                            messages = await BotService.GetConversationHistoryAsync(userId);
+                        }
+                    }
+                }
+                
+                // Показываем селектор интентов для выбора правильного интента или отправки эксперту
+                showIntentSelector = messageId;
+                selectedIntent = "";
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при обработке обратной связи");
+            errorMessage = "Не удалось отправить обратную связь. Попробуйте позже.";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ConfirmIntentSelection(int messageId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(selectedIntent))
+                return;
+
+            var success = await BotService.ProvideFeedbackAsync(messageId, false, selectedIntent);
+            if (success)
+            {
+                // Обновляем сообщение в списке
+                var message = messages.FirstOrDefault(m => m.Id == messageId);
+                if (message != null)
+                {
+                    message.UserFeedback = false;
+                    message.CorrectIntent = selectedIntent;
+                    message.Intent = selectedIntent;
+                }
+
+                // Перезагружаем историю, чтобы получить обновленные данные
+                var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+                var user = authState.User;
+                if (user.Identity?.IsAuthenticated == true)
+                {
+                    var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                    if (!string.IsNullOrEmpty(userId))
+                    {
+                        messages = await BotService.GetConversationHistoryAsync(userId);
+                    }
+                }
+
+                showIntentSelector = null;
+                selectedIntent = "";
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при подтверждении интента");
+            errorMessage = "Не удалось обучить бота. Попробуйте позже.";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void CancelIntentSelection()
+    {
+        showIntentSelector = null;
+        selectedIntent = "";
+        StateHasChanged();
+    }
+
+    private ChatMessage? GetUserMessageForBotResponse(ChatMessage botMessage)
+    {
+        // Находим соответствующее сообщение пользователя
+        // Ищем сообщение пользователя, которое идет перед этим ответом бота
+        var messageIndex = messages.IndexOf(botMessage);
+        if (messageIndex > 0 && messages[messageIndex - 1].IsUserMessage)
+        {
+            return messages[messageIndex - 1];
+        }
+        
+        // Если не нашли по индексу, ищем по Response
+        return messages
+            .Where(m => m.IsUserMessage && m.Response == botMessage.Message)
+            .OrderByDescending(m => m.Timestamp)
+            .FirstOrDefault();
+    }
+
+    private string GetIntentDisplayName(string intentName)
+    {
+        return intentName switch
+        {
+            "greeting" => "Приветствие",
+            "help" => "Помощь",
+            "thanks" => "Благодарность",
+            "farewell" => "Прощание",
+            "unknown" => "Неизвестно",
+            _ => intentName
+        };
+    }
+
+    private async Task SendToExpert(int messageId, string question)
+    {
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated != true)
+            {
+                errorMessage = "Для отправки вопроса эксперту необходимо войти в систему.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                errorMessage = "Не удалось определить пользователя.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var success = await BotService.SendToExpertAsync(messageId, userId, question);
+            
+            if (success)
+            {
+                // Обновляем сообщение
+                var message = messages.FirstOrDefault(m => m.Id == messageId);
+                if (message != null)
+                {
+                    message.UserFeedback = false;
+                    message.CorrectIntent = "expert";
+                }
+
+                // Добавляем сообщение о том, что вопрос отправлен эксперту
+                messages.Add(new ChatMessage
+                {
+                    Message = "Ваш вопрос отправлен эксперту. Вы получите ответ в ближайшее время.",
+                    IsUserMessage = false,
+                    Timestamp = DateTime.Now
+                });
+
+                showIntentSelector = null;
+                errorMessage = "";
+                Logger.LogInformation("Вопрос отправлен эксперту. MessageId: {MessageId}, Question: {Question}", messageId, question);
+            }
+            else
+            {
+                errorMessage = "Не удалось отправить вопрос эксперту. Попробуйте позже.";
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Ошибка при отправке вопроса эксперту");
+            errorMessage = "Произошла ошибка при отправке вопроса. Попробуйте позже.";
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+}

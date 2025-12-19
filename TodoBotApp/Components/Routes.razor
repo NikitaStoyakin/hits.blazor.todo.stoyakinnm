@@ -2,8 +2,17 @@
 <Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
-            <NotAuthorized>
-                <RedirectToLogin />
+            <NotAuthorized Context="authContext">
+                <AuthorizeView Context="innerContext">
+                    <Authorized>
+                        @* Пользователь авторизован, но не имеет нужной роли - перенаправляем на главную *@
+                        <RedirectToHome />
+                    </Authorized>
+                    <NotAuthorized>
+                        @* Пользователь не авторизован - перенаправляем на логин *@
+                        <RedirectToLogin />
+                    </NotAuthorized>
+                </AuthorizeView>
             </NotAuthorized>
         </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />

@@ -1,0 +1,10 @@
+﻿@page "/chat"
+@using TodoBotApp.Components.Chat
+@using static Microsoft.AspNetCore.Components.Web.RenderMode
+
+<PageTitle>Чат-бот поддержки</PageTitle>
+
+<h1>💬 Чат-бот поддержки</h1>
+<p>Наш виртуальный помощник готов помочь вам 24/7</p>
+
+<ChatWindow @rendermode="InteractiveServer" />
