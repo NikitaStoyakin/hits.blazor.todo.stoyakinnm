@@ -14,7 +14,6 @@ namespace Microsoft.AspNetCore.Routing
 {
     internal static class IdentityComponentsEndpointRouteBuilderExtensions
     {
-        // These endpoints are required by the Identity Razor components defined in the /Components/Account/Pages directory of this project.
         public static IEndpointConventionBuilder MapAdditionalIdentityEndpoints(this IEndpointRouteBuilder endpoints)
         {
             ArgumentNullException.ThrowIfNull(endpoints);
@@ -56,7 +55,6 @@ namespace Microsoft.AspNetCore.Routing
                 [FromServices] SignInManager<ApplicationUser> signInManager,
                 [FromForm] string provider) =>
             {
-                // Clear the existing external cookie to ensure a clean login process
                 await context.SignOutAsync(IdentityConstants.ExternalScheme);
 
                 var redirectUrl = UriHelper.BuildRelative(
@@ -85,7 +83,6 @@ namespace Microsoft.AspNetCore.Routing
                 var userId = await userManager.GetUserIdAsync(user);
                 downloadLogger.LogInformation("User with ID '{UserId}' asked for their personal data.", userId);
 
-                // Only include personal data for download
                 var personalData = new Dictionary<string, string>();
                 var personalDataProps = typeof(ApplicationUser).GetProperties().Where(
                     prop => Attribute.IsDefined(prop, typeof(PersonalDataAttribute)));

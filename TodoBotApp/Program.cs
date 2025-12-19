@@ -39,7 +39,6 @@ namespace TodoBotApp
 
             builder.Services.AddIdentityCore<ApplicationUser>(options => 
             {
-                // В режиме разработки отключаем требование подтверждения email
                 options.SignIn.RequireConfirmedAccount = !builder.Environment.IsDevelopment();
             })
                 .AddRoles<IdentityRole>()
@@ -71,7 +70,6 @@ namespace TodoBotApp
 
             app.MapAdditionalIdentityEndpoints();
 
-            // Инициализация ролей и тестового пользователя
             await InitializeRolesAsync(app.Services);
             if (app.Environment.IsDevelopment())
             {
@@ -106,24 +104,21 @@ namespace TodoBotApp
             const string expertEmail = "expert@test.com";
             const string expertPassword = "Expert123!";
 
-            // Проверяем, существует ли уже пользователь
             var expertUser = await userManager.FindByEmailAsync(expertEmail);
             
             if (expertUser == null)
             {
-                // Создаем нового пользователя-эксперта
                 expertUser = new ApplicationUser
                 {
                     UserName = expertEmail,
                     Email = expertEmail,
-                    EmailConfirmed = true // Подтверждаем email автоматически для тестового пользователя
+                    EmailConfirmed = true
                 };
 
                 var result = await userManager.CreateAsync(expertUser, expertPassword);
                 
                 if (result.Succeeded)
                 {
-                    // Назначаем роль Expert
                     var expertRole = await roleManager.FindByNameAsync("Expert");
                     if (expertRole != null)
                     {
@@ -133,7 +128,6 @@ namespace TodoBotApp
             }
             else
             {
-                // Если пользователь уже существует, проверяем и назначаем роль, если её нет
                 var isInRole = await userManager.IsInRoleAsync(expertUser, "Expert");
                 if (!isInRole)
                 {

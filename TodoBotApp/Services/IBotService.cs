@@ -53,7 +53,6 @@ namespace TodoBotApp.Services
         {
             try
             {
-                // Загружаем интенты из базы данных
                 var dbIntents = await _context.Intents.ToListAsync();
                 
                 if (dbIntents.Any())
@@ -61,7 +60,6 @@ namespace TodoBotApp.Services
                     _intents.Clear();
                     _intents.AddRange(dbIntents);
                     
-                    // Удаляем старое сообщение об отправке эксперту из всех интентов, если оно есть
                     var expertMessage = "Я не смог найти ответ на ваш вопрос. Ваш вопрос отправлен эксперту, и вы получите ответ в ближайшее время.";
                     bool needsSave = false;
                     
@@ -81,14 +79,12 @@ namespace TodoBotApp.Services
                 }
                 else
                 {
-                    // Если интентов нет в БД, загружаем базовые и сохраняем их
                     LoadDefaultIntents();
                     await SaveIntentsToDatabaseAsync();
                 }
             }
             catch
             {
-                // Если ошибка при загрузке из БД, используем базовые интенты
                 LoadDefaultIntents();
             }
         }
@@ -109,8 +105,6 @@ namespace TodoBotApp.Services
 
         public async Task<(string Response, int UserMessageId)> ProcessMessageAsync(string message, string userId)
         {
-            // Убеждаемся, что интенты загружены
-            // Если интенты уже загружены, перезагружаем их для получения новых интентов от экспертов
             if (_intentsLoaded)
             {
                 await ReloadIntentsAsync();
@@ -123,11 +117,9 @@ namespace TodoBotApp.Services
             var intent = AnalyzeIntent(message);
             var response = GetResponse(intent, message);
 
-            // Если интент неизвестен (низкая уверенность), отправляем эксперту
             bool shouldSendToExpert = false;
             if (intent.Confidence < 0.3 && intent.Name == "unknown")
             {
-                // Проверяем, не отправлен ли уже этот вопрос эксперту
                 var normalizedMessage = message.ToLower().Trim();
                 var existingQuestion = await _context.ExpertQuestions
                     .Where(q => q.UserId == userId && 
@@ -145,16 +137,13 @@ namespace TodoBotApp.Services
             }
             else if (intent.Confidence < 0.5 && intent.Name == "unknown")
             {
-                // Пытаемся обучиться
                 await TryLearnFromUnknownMessage(message, response);
             }
             else if (intent.Name != "unknown")
             {
-                // Увеличиваем счетчик использования интента
                 await IncrementIntentUsageAsync(intent.Name);
             }
 
-            // Сохраняем сообщение пользователя
             var userMessage = new ChatMessage
             {
                 UserId = userId,
@@ -166,7 +155,6 @@ namespace TodoBotApp.Services
                 Confidence = intent.Confidence
             };
 
-            // Сохраняем ответ бота
             var botMessage = new ChatMessage
             {
                 UserId = userId,
@@ -182,7 +170,6 @@ namespace TodoBotApp.Services
             _context.ChatMessages.Add(botMessage);
             await _context.SaveChangesAsync();
 
-            // Если нужно отправить эксперту, создаем вопрос после сохранения сообщения
             if (shouldSendToExpert)
             {
                 await _expertService.CreateExpertQuestionAsync(userId, message, userMessage.Id);
@@ -195,7 +182,6 @@ namespace TodoBotApp.Services
         {
             try
             {
-                // Проверяем, не отправлен ли уже этот вопрос эксперту
                 var existingQuestion = await _context.ExpertQuestions
                     .FirstOrDefaultAsync(q => q.UserId == userId && 
                                               q.RelatedChatMessageId == messageId);
@@ -226,8 +212,6 @@ namespace TodoBotApp.Services
                 .Take(50) 
                 .ToListAsync();
 
-            // Проверяем, есть ли ответы экспертов на вопросы пользователя
-            // Добавляем ответы экспертов только для тех вопросов, которые связаны с конкретными сообщениями
             var expertQuestions = await _context.ExpertQuestions
                 .Where(q => q.UserId == userId && 
                            q.Status == ExpertQuestionStatus.Answered && 
@@ -237,25 +221,20 @@ namespace TodoBotApp.Services
 
             foreach (var question in expertQuestions)
             {
-                // Находим соответствующее сообщение пользователя
                 var relatedUserMessage = chatMessages.FirstOrDefault(m => 
                     m.Id == question.RelatedChatMessageId.Value);
 
                 if (relatedUserMessage == null)
                     continue;
 
-                // Проверяем, не использовал ли бот уже этот ответ через интент
-                // Если после сообщения пользователя есть ответ бота с таким же текстом, значит бот уже использовал ответ эксперта
                 var botUsedExpertAnswer = chatMessages.Any(m => 
                     !m.IsUserMessage && 
                     m.Message == question.Answer &&
                     m.Timestamp > relatedUserMessage.Timestamp);
 
-                // Если бот уже использовал ответ эксперта, не добавляем сообщение "Ответ эксперта"
                 if (botUsedExpertAnswer)
                     continue;
 
-                // Проверяем, не добавлено ли уже сообщение с ответом эксперта для этого вопроса
                 var existingExpertMessage = chatMessages.FirstOrDefault(m => 
                     m.Message.Contains("Ответ эксперта") && 
                     m.Message.Contains(question.Answer ?? "") &&
@@ -263,13 +242,11 @@ namespace TodoBotApp.Services
 
                 if (existingExpertMessage == null)
                 {
-                    // Создаем сообщение с ответом эксперта с временной меткой после сообщения пользователя
                     var expertMessage = new ChatMessage
                     {
                         UserId = userId,
                         Message = $"👨‍💼 Ответ эксперта:\n\n{question.Answer}",
                         Response = null,
-                        // Временная метка должна быть после сообщения пользователя, но не раньше времени ответа эксперта
                         Timestamp = (question.AnsweredAt ?? DateTime.UtcNow) > relatedUserMessage.Timestamp 
                             ? (question.AnsweredAt ?? DateTime.UtcNow) 
                             : relatedUserMessage.Timestamp.AddSeconds(1),
@@ -323,13 +300,11 @@ namespace TodoBotApp.Services
             {
                 foreach (var pattern in intent.Patterns)
                 {
-                    // Точное совпадение
                     if (normalizedMessage == pattern)
                     {
                         return (intent.Name, 0.95);
                     }
 
-                    // Частичное совпадение (содержит паттерн)
                     if (normalizedMessage.Contains(pattern) || pattern.Contains(normalizedMessage))
                     {
                         var similarity = CalculateSimilarity(normalizedMessage, pattern);
@@ -342,7 +317,6 @@ namespace TodoBotApp.Services
                 }
             }
 
-            // Если нашли достаточно похожий паттерн, возвращаем его
             if (bestSimilarity >= 0.5)
             {
                 return bestMatch;
@@ -370,7 +344,6 @@ namespace TodoBotApp.Services
 
         private bool AreQuestionsSimilarForExpert(string question1, string question2)
         {
-            // Простой алгоритм проверки схожести вопросов
             var words1 = question1.Split(new[] { ' ', ',', '.', '!', '?', ':', ';' }, StringSplitOptions.RemoveEmptyEntries)
                 .Where(w => w.Length >= 3)
                 .ToList();
@@ -383,7 +356,6 @@ namespace TodoBotApp.Services
             var commonWords = words1.Intersect(words2).Count();
             var totalWords = Math.Max(words1.Count, words2.Count);
 
-            // Если более 50% слов совпадают, считаем вопросы похожими
             return (double)commonWords / totalWords >= 0.5;
         }
 
@@ -395,11 +367,9 @@ namespace TodoBotApp.Services
                 var random = new Random();
                 var response = foundIntent.Responses[random.Next(foundIntent.Responses.Count)];
                 
-                // Убираем старое сообщение об отправке эксперту, если оно случайно попало в ответы
                 var oldExpertMessage = "Я не смог найти ответ на ваш вопрос. Ваш вопрос отправлен эксперту, и вы получите ответ в ближайшее время.";
                 if (response == oldExpertMessage)
                 {
-                    // Если это старое сообщение, возвращаем стандартное
                     return "Извините, я не совсем понимаю ваш вопрос. Можете переформулировать?";
                 }
                 
@@ -462,54 +432,44 @@ namespace TodoBotApp.Services
             }
             catch
             {
-                // Игнорируем ошибки при сохранении
             }
         }
 
-        // Подход 1: Обучение на основе частоты повторений
         private async Task TryLearnFromUnknownMessage(string message, string response)
         {
             try
             {
                 var normalizedMessage = message.ToLower().Trim();
                 
-                // Проверяем, сколько раз это сообщение уже встречалось
                 var messageCount = await _context.ChatMessages
                     .Where(cm => cm.IsUserMessage && 
                                 cm.Message.ToLower().Trim() == normalizedMessage &&
                                 cm.Intent == "unknown")
                     .CountAsync();
 
-                // Если сообщение повторяется 3+ раза, пытаемся обучиться
                 if (messageCount >= 3)
                 {
                     await LearnFromFrequentMessage(normalizedMessage);
                 }
                 else
                 {
-                    // Пытаемся найти похожие сообщения по контексту или структуре
                     await LearnFromSimilarMessages(normalizedMessage);
                 }
             }
             catch
             {
-                // Игнорируем ошибки при обучении
             }
         }
 
-        // Обучение на основе частоты - если сообщение часто повторяется
         private async Task LearnFromFrequentMessage(string normalizedMessage)
         {
             try
             {
-                // Ищем, какие интенты чаще всего встречаются в диалогах с этим сообщением
-                // Анализируем контекст - что было до и после этого сообщения
                 var messagesWithContext = await _context.ChatMessages
                     .Where(cm => cm.IsUserMessage)
                     .OrderBy(cm => cm.Timestamp)
                     .ToListAsync();
 
-                // Находим все вхождения этого сообщения
                 var messageIndices = new List<int>();
                 for (int i = 0; i < messagesWithContext.Count; i++)
                 {
@@ -519,12 +479,10 @@ namespace TodoBotApp.Services
                     }
                 }
 
-                // Анализируем контекст вокруг каждого вхождения
                 var intentCandidates = new Dictionary<string, int>();
                 
                 foreach (var idx in messageIndices)
                 {
-                    // Смотрим сообщение перед этим (если есть)
                     if (idx > 0)
                     {
                         var prevMessage = messagesWithContext[idx - 1];
@@ -535,7 +493,6 @@ namespace TodoBotApp.Services
                         }
                     }
 
-                    // Смотрим сообщение после этого (если есть)
                     if (idx < messagesWithContext.Count - 1)
                     {
                         var nextMessage = messagesWithContext[idx + 1];
@@ -547,7 +504,6 @@ namespace TodoBotApp.Services
                     }
                 }
 
-                // Выбираем наиболее вероятный интент
                 var bestIntent = intentCandidates
                     .OrderByDescending(kvp => kvp.Value)
                     .FirstOrDefault();
@@ -559,24 +515,20 @@ namespace TodoBotApp.Services
             }
             catch
             {
-                // Игнорируем ошибки
             }
         }
 
-        // Обучение на основе похожих сообщений (улучшенный алгоритм)
         private async Task LearnFromSimilarMessages(string normalizedMessage)
         {
             try
             {
-                // Извлекаем все слова (не только длиннее 3 символов)
                 var words = normalizedMessage
                     .Split(new[] { ' ', ',', '.', '!', '?', ':', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Where(w => w.Length >= 2) // Минимум 2 символа
+                    .Where(w => w.Length >= 2)
                     .ToList();
 
                 if (!words.Any()) return;
 
-                // Ищем сообщения, которые содержат хотя бы 2 общих слова
                 var similarMessages = await _context.ChatMessages
                     .Where(cm => cm.IsUserMessage && 
                                 cm.Intent != null && 
@@ -592,7 +544,6 @@ namespace TodoBotApp.Services
                         .Where(w => w.Length >= 2)
                         .ToList();
 
-                    // Считаем количество общих слов
                     var commonWords = words.Intersect(msgWords).Count();
                     
                     if (commonWords >= 2 && msg.Intent != null)
@@ -602,7 +553,6 @@ namespace TodoBotApp.Services
                     }
                 }
 
-                // Выбираем интент с наибольшим количеством совпадений
                 var bestMatch = intentMatches
                     .OrderByDescending(kvp => kvp.Value)
                     .FirstOrDefault();
@@ -614,11 +564,9 @@ namespace TodoBotApp.Services
             }
             catch
             {
-                // Игнорируем ошибки
             }
         }
 
-        // Добавление паттерна к интенту
         private async Task AddPatternToIntent(string intentName, string pattern)
         {
             try
@@ -636,7 +584,6 @@ namespace TodoBotApp.Services
                         existingIntent.Patterns = patterns;
                         existingIntent.UpdatedAt = DateTime.UtcNow;
                         
-                        // Обновляем в памяти
                         var inMemoryIntent = _intents.FirstOrDefault(i => i.Name == intentName);
                         if (inMemoryIntent != null)
                         {
@@ -649,11 +596,9 @@ namespace TodoBotApp.Services
             }
             catch
             {
-                // Игнорируем ошибки
             }
         }
 
-        // Подход 2: Обучение на основе обратной связи пользователя
         public async Task<bool> ProvideFeedbackAsync(int messageId, bool isCorrect, string? correctIntent = null)
         {
             try
@@ -665,23 +610,18 @@ namespace TodoBotApp.Services
 
                 message.UserFeedback = isCorrect;
 
-                // Если пользователь недоволен ответом (isCorrect = false), отправляем вопрос эксперту
                 if (!isCorrect)
                 {
-                    // Убеждаемся, что интенты загружены
                     await EnsureIntentsLoadedAsync();
 
                     var normalizedQuestion = message.Message.ToLower().Trim();
                     var hasExpertAnswer = false;
                     
-                    // Сначала проверяем, есть ли уже ответ эксперта на похожий вопрос (через интенты)
-                    // Ищем интенты, созданные экспертом (начинаются с "expert_")
                     var expertIntents = _intents.Where(i => i.Name.StartsWith("expert_")).ToList();
                     foreach (var expertIntent in expertIntents)
                     {
                         foreach (var pattern in expertIntent.Patterns)
                         {
-                            // Проверяем схожесть вопроса с паттерном
                             if (AreQuestionsSimilarForExpert(normalizedQuestion, pattern))
                             {
                                 hasExpertAnswer = true;
@@ -691,18 +631,14 @@ namespace TodoBotApp.Services
                         if (hasExpertAnswer) break;
                     }
 
-                    // Если есть ответ эксперта на похожий вопрос - всегда отправляем эксперту для повторной проверки
-                    // Если нет ответа эксперта - проверяем, не отправлен ли уже этот вопрос для этого сообщения
                     bool shouldSendToExpert = false;
                     
                     if (hasExpertAnswer)
                     {
-                        // Если есть ответ эксперта, отправляем даже если уже был вопрос для этого сообщения
                         shouldSendToExpert = true;
                     }
                     else
                     {
-                        // Если нет ответа эксперта, проверяем, не отправлен ли уже этот вопрос для этого сообщения
                         var existingQuestionForMessage = await _context.ExpertQuestions
                             .FirstOrDefaultAsync(q => q.UserId == message.UserId && 
                                                       q.RelatedChatMessageId == messageId);
@@ -715,9 +651,6 @@ namespace TodoBotApp.Services
 
                     if (shouldSendToExpert)
                     {
-                        // Отправляем вопрос эксперту
-                        // Если есть ответ эксперта - это повторная отправка (пользователь недоволен)
-                        // Если нет ответа эксперта - это новая отправка
                         await _expertService.CreateExpertQuestionAsync(message.UserId, message.Message, messageId);
                     }
 
@@ -725,17 +658,14 @@ namespace TodoBotApp.Services
                     {
                         message.CorrectIntent = correctIntent;
                         
-                        // Добавляем паттерн к указанному интенту
                         await AddPatternToIntent(correctIntent, message.Message.ToLower().Trim());
                         
-                        // Обновляем интент сообщения
                         message.Intent = correctIntent;
                         message.Confidence = 0.9;
                     }
                 }
                 else if (isCorrect && message.Intent != null)
                 {
-                    // Подтверждаем правильность - увеличиваем уверенность
                     message.Confidence = Math.Min(1.0, message.Confidence + 0.1);
                 }
 
@@ -764,7 +694,6 @@ namespace TodoBotApp.Services
             }
             catch
             {
-                // Игнорируем ошибки
             }
         }
     }

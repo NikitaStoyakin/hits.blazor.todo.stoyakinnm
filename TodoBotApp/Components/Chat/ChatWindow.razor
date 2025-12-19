@@ -473,7 +473,6 @@
     {
         try
         {
-            // Загружаем доступные интенты
             availableIntents = await BotService.GetAvailableIntentsAsync();
 
             var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
@@ -697,11 +696,9 @@
         {
             if (isCorrect)
             {
-                // Позитивная обратная связь
                 var success = await BotService.ProvideFeedbackAsync(messageId, true);
                 if (success)
                 {
-                    // Обновляем сообщение в списке
                     var message = messages.FirstOrDefault(m => m.Id == messageId);
                     if (message != null)
                     {
@@ -712,19 +709,15 @@
             }
             else
             {
-                // Негативная обратная связь - вызываем ProvideFeedbackAsync для отправки вопроса эксперту
-                // (если есть похожий вопрос с ответом эксперта, вопрос будет отправлен автоматически)
                 var success = await BotService.ProvideFeedbackAsync(messageId, false);
                 if (success)
                 {
-                    // Обновляем сообщение в списке
                     var message = messages.FirstOrDefault(m => m.Id == messageId);
                     if (message != null)
                     {
                         message.UserFeedback = false;
                     }
                     
-                    // Перезагружаем историю, чтобы получить обновленные данные
                     var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
                     var user = authState.User;
                     if (user.Identity?.IsAuthenticated == true)
@@ -737,7 +730,6 @@
                     }
                 }
                 
-                // Показываем селектор интентов для выбора правильного интента или отправки эксперту
                 showIntentSelector = messageId;
                 selectedIntent = "";
                 await InvokeAsync(StateHasChanged);
@@ -761,7 +753,6 @@
             var success = await BotService.ProvideFeedbackAsync(messageId, false, selectedIntent);
             if (success)
             {
-                // Обновляем сообщение в списке
                 var message = messages.FirstOrDefault(m => m.Id == messageId);
                 if (message != null)
                 {
@@ -770,7 +761,6 @@
                     message.Intent = selectedIntent;
                 }
 
-                // Перезагружаем историю, чтобы получить обновленные данные
                 var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
                 var user = authState.User;
                 if (user.Identity?.IsAuthenticated == true)
@@ -804,15 +794,12 @@
 
     private ChatMessage? GetUserMessageForBotResponse(ChatMessage botMessage)
     {
-        // Находим соответствующее сообщение пользователя
-        // Ищем сообщение пользователя, которое идет перед этим ответом бота
         var messageIndex = messages.IndexOf(botMessage);
         if (messageIndex > 0 && messages[messageIndex - 1].IsUserMessage)
         {
             return messages[messageIndex - 1];
         }
         
-        // Если не нашли по индексу, ищем по Response
         return messages
             .Where(m => m.IsUserMessage && m.Response == botMessage.Message)
             .OrderByDescending(m => m.Timestamp)
@@ -858,7 +845,6 @@
             
             if (success)
             {
-                // Обновляем сообщение
                 var message = messages.FirstOrDefault(m => m.Id == messageId);
                 if (message != null)
                 {
@@ -866,7 +852,6 @@
                     message.CorrectIntent = "expert";
                 }
 
-                // Добавляем сообщение о том, что вопрос отправлен эксперту
                 messages.Add(new ChatMessage
                 {
                     Message = "Ваш вопрос отправлен эксперту. Вы получите ответ в ближайшее время.",

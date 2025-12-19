@@ -5,26 +5,25 @@
         public int Id { get; set; }
         public string UserId { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
-        public string? Response { get; set; } // Ответ бота (только для сообщений пользователя)
+        public string? Response { get; set; }
         public DateTime Timestamp { get; set; }
         public bool IsUserMessage { get; set; }
-        public string? Intent { get; set; } // Для анализа намерений (только для сообщений пользователя)
-        public double Confidence { get; set; } // Уверенность ответа (только для сообщений пользователя)
-        public bool? UserFeedback { get; set; } // Обратная связь пользователя: true - правильно, false - неправильно, null - нет обратной связи
-        public string? CorrectIntent { get; set; } // Правильный интент, указанный пользователем
+        public string? Intent { get; set; }
+        public double Confidence { get; set; }
+        public bool? UserFeedback { get; set; }
+        public string? CorrectIntent { get; set; }
     }
 
     public class Intent
     {
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
-        public string PatternsJson { get; set; } = "[]"; // JSON массив строк для хранения в БД
-        public string ResponsesJson { get; set; } = "[]"; // JSON массив строк для хранения в БД
+        public string PatternsJson { get; set; } = "[]";
+        public string ResponsesJson { get; set; } = "[]";
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-        public int UsageCount { get; set; } = 0; // Счетчик использования интента
+        public int UsageCount { get; set; } = 0;
 
-        // Вспомогательные свойства для работы в памяти (не сохраняются в БД)
         [System.Text.Json.Serialization.JsonIgnore]
         public List<string> Patterns
         {

@@ -355,7 +355,6 @@ else
 
             if (success)
             {
-                // Удаляем вопрос из списка, так как он теперь отвечен
                 var question = pendingQuestions.FirstOrDefault(q => q.Id == questionId);
                 if (question != null)
                 {
